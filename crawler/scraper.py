@@ -2,6 +2,8 @@ import requests
 import json
 import os
 import re
+import sys
+import time
 from datetime import datetime, timedelta
 
 # ================= 配置区域 =================
@@ -12,7 +14,7 @@ DATA_DIR = os.environ.get("DATA_DIR", SCRIPT_DIR)
 # wewe-rss 服务的地址（Docker 中通过 WEWE_RSS_URL 配置）
 BASE_URL = os.environ.get("WEWE_RSS_URL", "http://localhost:4000")
 # 获取所有订阅源的 JSON Feed 接口 (增加 limit 参数以获取更多历史文章)
-FEED_URL = f"{BASE_URL}/feeds/all.json?limit=500"
+FEED_URL = f"{BASE_URL}/feeds/all.json?limit=20"
 # 结果存储文件
 OUTPUT_FILE = os.path.join(DATA_DIR, "wechat_data_archive.json")
 # 日志文件
@@ -20,7 +22,11 @@ LOG_FILE = os.path.join(DATA_DIR, "scraper.log")
 
 # 过滤配置：仅获取最近多久的文章 (单位：小时)
 # 设置为 24 代表仅获取过去 24 小时发布的内容；设置为 None 则不限制
-FETCH_SINCE_HOURS = 48 
+FETCH_SINCE_HOURS_ENV = os.environ.get("FETCH_SINCE_HOURS", "48").strip()
+FETCH_SINCE_HOURS = int(FETCH_SINCE_HOURS_ENV) if FETCH_SINCE_HOURS_ENV else None
+REQUEST_TIMEOUT = int(os.environ.get("SCRAPER_REQUEST_TIMEOUT", "180"))
+MAX_RETRIES = int(os.environ.get("SCRAPER_MAX_RETRIES", "3"))
+RETRY_DELAY_SECONDS = int(os.environ.get("SCRAPER_RETRY_DELAY_SECONDS", "10"))
 # ===========================================
 
 def log(message):
@@ -44,6 +50,7 @@ def clean_html(html_content):
     return clean
 
 def fetch_wechat_articles():
+    os.makedirs(DATA_DIR, exist_ok=True)
     log(f"开始抓取任务 (过滤范围: 最近 {FETCH_SINCE_HOURS if FETCH_SINCE_HOURS else '所有'} 小时)")
     
     # 计算时间阈值
@@ -51,13 +58,25 @@ def fetch_wechat_articles():
     if FETCH_SINCE_HOURS:
         since_threshold = datetime.now() - timedelta(hours=FETCH_SINCE_HOURS)
 
-    try:
-        response = requests.get(FEED_URL, timeout=60)
-        response.raise_for_status()
-        feed_data = response.json()
-    except Exception as e:
-        log(f"错误: 无法获取数据 - {e}")
-        return
+    feed_data = None
+    last_error = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            log(f"正在拉取订阅源: {FEED_URL} (第 {attempt}/{MAX_RETRIES} 次, timeout={REQUEST_TIMEOUT}s)")
+            response = requests.get(FEED_URL, timeout=REQUEST_TIMEOUT)
+            response.raise_for_status()
+            feed_data = response.json()
+            break
+        except Exception as e:
+            last_error = e
+            log(f"错误: 获取数据失败 (第 {attempt}/{MAX_RETRIES} 次) - {e}")
+            if attempt < MAX_RETRIES:
+                log(f"将在 {RETRY_DELAY_SECONDS} 秒后重试...")
+                time.sleep(RETRY_DELAY_SECONDS)
+
+    if feed_data is None:
+        log(f"错误: 无法获取数据，已重试 {MAX_RETRIES} 次 - {last_error}")
+        return False
 
     items = feed_data.get('items', [])
     log(f"接口返回文章总数: {len(items)}")
@@ -125,10 +144,10 @@ def fetch_wechat_articles():
         msg += f"，因时间范围过滤: {filtered_count} 篇"
     log(msg)
 
-    if new_count > 0:
+    if new_count > 0 or not os.path.exists(OUTPUT_FILE):
         # 按发布时间倒序排列
         existing_data.sort(key=lambda x: x.get('publish_time') or '', reverse=True)
-        
+
         try:
             temp_file = OUTPUT_FILE + ".tmp"
             with open(temp_file, 'w', encoding='utf-8') as f:
@@ -137,6 +156,10 @@ def fetch_wechat_articles():
             log(f"总计归档文章: {len(existing_data)} 篇。")
         except Exception as e:
             log(f"错误: 保存数据工作失败 - {e}")
+            return False
+
+    return True
 
 if __name__ == "__main__":
-    fetch_wechat_articles()
+    success = fetch_wechat_articles()
+    sys.exit(0 if success else 1)
