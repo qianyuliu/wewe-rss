@@ -16,6 +16,7 @@ import os
 import re
 from datetime import datetime, timedelta
 
+from github_enricher import enrich_github_record
 from llm_client import get_openai_client, resolve_model_name
 
 # ================= 配置 =================
@@ -274,9 +275,11 @@ def run():
 
         if article_type == "github_project" and data:
             record = _build_github_record(data, today, url)
+            # 调用 GitHub API 补全真实数据（stars/forks/readme/topics/license 等）
+            record = enrich_github_record(record)
             _append_jsonl(github_output, record)
             github_count += 1
-            logger.info("  → GitHub 项目: %s → %s", data.get("repo_path", ""), github_output)
+            logger.info("  → GitHub 项目: %s → %s", record.get("repo_path", ""), github_output)
 
         elif article_type == "paper" and data:
             record = _build_paper_record(data, url)

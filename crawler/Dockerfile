@@ -10,7 +10,7 @@ WORKDIR /app
 RUN pip install --no-cache-dir openai requests
 
 # 复制爬虫脚本
-COPY scraper.py llm_client.py article_analyzer.py archive_info.py /app/
+COPY scraper.py llm_client.py article_analyzer.py archive_info.py github_enricher.py /app/
 
 # 复制启动和流水线脚本
 COPY entrypoint.sh run_pipeline.sh /app/
