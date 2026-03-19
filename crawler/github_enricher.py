@@ -47,6 +47,21 @@ def _parse_repo_path(repo_url: str) -> tuple[str, str] | None:
     return None
 
 
+def _normalize_repo_url(record: dict) -> str:
+    """Return a usable repository URL from repo_url or repo_path."""
+    repo_url = (record.get("repo_url") or "").strip()
+    if _parse_repo_path(repo_url):
+        return repo_url
+
+    repo_path = (record.get("repo_path") or "").strip().strip("/")
+    if re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo_path):
+        normalized = f"https://github.com/{repo_path}"
+        logger.info("  ↳ repo_url invalid, fallback to repo_path: %s", normalized)
+        return normalized
+
+    return repo_url
+
+
 def fetch_repo_info(repo_url: str) -> dict | None:
     """调用 GitHub API 获取仓库元数据，失败返回 None。"""
     parsed = _parse_repo_path(repo_url)
@@ -108,7 +123,7 @@ def enrich_github_record(record: dict) -> dict:
     补全策略：API 数据覆盖 LLM 提取的数值型字段（stars/forks 等），
     但 description 保留 LLM 的详细总结（比 GitHub 原始描述更有价值）。
     """
-    repo_url = record.get("repo_url", "")
+    repo_url = _normalize_repo_url(record)
     if not repo_url:
         logger.warning("缺少 repo_url，跳过 GitHub API 补全")
         return record
@@ -116,6 +131,7 @@ def enrich_github_record(record: dict) -> dict:
     logger.info("  ↳ GitHub API 补全: %s", repo_url)
 
     # 1. 获取仓库信息
+    record["repo_url"] = repo_url
     repo_info = fetch_repo_info(repo_url)
     if repo_info:
         # 精确数据覆盖 LLM 猜测值

@@ -145,6 +145,57 @@ def _append_jsonl(filepath: str, record: dict):
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
+def _load_existing_jsonl_keys(filepath: str, record_type: str) -> set[str]:
+    keys: set[str] = set()
+    if not os.path.exists(filepath):
+        return keys
+
+    with open(filepath, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            key = _record_dedupe_key(record_type, record)
+            if key:
+                keys.add(key)
+
+    return keys
+
+
+def _record_dedupe_key(record_type: str, record: dict) -> str:
+    if record_type == "github":
+        for value in (
+            (record.get("repo_path") or "").strip().lower(),
+            (record.get("repo_url") or "").strip().lower(),
+            (record.get("source_url") or "").strip().lower(),
+        ):
+            if value:
+                return value
+        return ""
+
+    if record_type == "paper":
+        for value in (
+            (record.get("paper_id") or "").strip().lower(),
+            (record.get("paper_url") or "").strip().lower(),
+            (record.get("detail_url") or "").strip().lower(),
+            (record.get("source_url") or "").strip().lower(),
+        ):
+            if value:
+                return value
+
+        title = (record.get("title") or "").strip().lower()
+        authors = (record.get("authors") or "").strip().lower()
+        if title:
+            return f"{title}::{authors}"
+
+    return ""
+
+
 def _extract_json_from_response(text: str) -> dict | None:
     """从 LLM 回复中提取 JSON，兼容 markdown 代码块和裸 JSON。"""
     match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", text, re.DOTALL)
@@ -154,6 +205,109 @@ def _extract_json_from_response(text: str) -> dict | None:
         return json.loads(text.strip())
     except json.JSONDecodeError:
         return None
+
+
+def _extract_github_repo_urls(text: str) -> list[str]:
+    """Extract full GitHub repository URLs found in article content."""
+    if not text:
+        return []
+
+    matches = re.findall(
+        r"https?://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)(?:\.git)?(?:[/?#][^\s\"'<>]*)?",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    urls: list[str] = []
+    seen: set[str] = set()
+    for owner, repo in matches:
+        normalized = f"https://github.com/{owner}/{repo.removesuffix('.git')}"
+        key = normalized.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        urls.append(normalized)
+    return urls
+
+
+def _parse_github_repo_url(repo_url: str) -> tuple[str, str] | None:
+    if not repo_url:
+        return None
+
+    match = re.match(
+        r"https?://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)",
+        repo_url.strip(),
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+
+    owner = match.group(1)
+    repo = match.group(2).removesuffix(".git")
+    return owner, repo
+
+
+def _normalize_github_project_data(data: dict, article: dict) -> dict:
+    """Prefer repository metadata that can be verified from article content."""
+    normalized = dict(data or {})
+    repo_url = (normalized.get("repo_url") or "").strip()
+    repo_path = (normalized.get("repo_path") or "").strip().strip("/")
+    repo_name = (normalized.get("repo_name") or "").strip()
+    content = article.get("content_text", "")
+
+    repo_urls = _extract_github_repo_urls(content)
+    parsed_repo_url = _parse_github_repo_url(repo_url)
+
+    selected_url = ""
+    if parsed_repo_url:
+        normalized_repo_url = f"https://github.com/{parsed_repo_url[0]}/{parsed_repo_url[1]}"
+        extracted_lookup = {url.lower(): url for url in repo_urls}
+        selected_url = extracted_lookup.get(normalized_repo_url.lower(), normalized_repo_url)
+    else:
+        repo_path_match = None
+        if re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo_path):
+            repo_path_match = next(
+                (url for url in repo_urls if url.lower().endswith(f"/{repo_path.lower()}")),
+                None,
+            )
+
+        repo_name_match = None
+        if repo_name:
+            repo_name_match = next(
+                (url for url in repo_urls if url.rsplit("/", 1)[-1].lower() == repo_name.lower()),
+                None,
+            )
+
+        if repo_path_match:
+            selected_url = repo_path_match
+        elif repo_name_match:
+            selected_url = repo_name_match
+        elif len(repo_urls) == 1:
+            selected_url = repo_urls[0]
+
+    if selected_url:
+        owner, repo = _parse_github_repo_url(selected_url)
+        normalized["repo_url"] = selected_url
+        normalized["repo_owner"] = owner
+        normalized["repo_name"] = repo
+        normalized["repo_path"] = f"{owner}/{repo}"
+    elif repo_path and re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo_path):
+        owner, repo = repo_path.split("/", 1)
+        normalized["repo_url"] = f"https://github.com/{owner}/{repo}"
+        normalized["repo_owner"] = normalized.get("repo_owner") or owner
+        normalized["repo_name"] = normalized.get("repo_name") or repo
+        normalized["repo_path"] = f"{owner}/{repo}"
+
+    return normalized
+
+
+def _has_valid_github_repo(data: dict) -> bool:
+    """Return True when repo metadata resolves to a concrete owner/repo."""
+    repo_path = (data.get("repo_path") or "").strip().strip("/")
+    if re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo_path):
+        return True
+
+    return _parse_github_repo_url((data.get("repo_url") or "").strip()) is not None
 
 
 def _build_github_record(data: dict, today: str, source_url: str) -> dict:
@@ -221,6 +375,9 @@ def analyze_article(client, model: str, article: dict) -> dict | None:
             logger.warning("无法解析 LLM 返回的 JSON: %s | 原文: %s", title, reply[:200])
             return None
 
+        if result.get("type") == "github_project" and isinstance(result.get("data"), dict):
+            result["data"] = _normalize_github_project_data(result["data"], article)
+
         return result
     except Exception as e:
         logger.error("LLM 调用失败 [%s]: %s", title, e)
@@ -255,6 +412,8 @@ def run():
     today = datetime.now().strftime("%Y-%m-%d")
     github_output = _get_github_output_path(today)
     paper_output = _get_paper_output_path(today)
+    existing_github_keys = _load_existing_jsonl_keys(github_output, "github")
+    existing_paper_keys = _load_existing_jsonl_keys(paper_output, "paper")
 
     github_count = 0
     paper_count = 0
@@ -277,14 +436,39 @@ def run():
             record = _build_github_record(data, today, url)
             # 调用 GitHub API 补全真实数据（stars/forks/readme/topics/license 等）
             record = enrich_github_record(record)
-            _append_jsonl(github_output, record)
-            github_count += 1
+            if not _has_valid_github_repo(record):
+                logger.warning(
+                    "Skip invalid GitHub project output: %s | repo_url=%s | repo_path=%s",
+                    title, record.get("repo_url", ""), record.get("repo_path", "")
+                )
+                other_count += 1
+                processed_urls.add(url)
+                continue
+            else:
+                dedupe_key = _record_dedupe_key("github", record)
+                if dedupe_key and dedupe_key in existing_github_keys:
+                    logger.info("  ↳ GitHub 项目重复，跳过追加: %s", record.get("repo_path", "") or record.get("repo_url", ""))
+                    processed_urls.add(url)
+                    continue
+                else:
+                    _append_jsonl(github_output, record)
+                    if dedupe_key:
+                        existing_github_keys.add(dedupe_key)
+                    github_count += 1
             logger.info("  → GitHub 项目: %s → %s", record.get("repo_path", ""), github_output)
 
         elif article_type == "paper" and data:
             record = _build_paper_record(data, url)
-            _append_jsonl(paper_output, record)
-            paper_count += 1
+            dedupe_key = _record_dedupe_key("paper", record)
+            if dedupe_key and dedupe_key in existing_paper_keys:
+                logger.info("  ↳ 论文重复，跳过追加: %s", record.get("paper_id", "") or record.get("title", ""))
+                processed_urls.add(url)
+                continue
+            else:
+                _append_jsonl(paper_output, record)
+                if dedupe_key:
+                    existing_paper_keys.add(dedupe_key)
+                paper_count += 1
             logger.info("  → 论文: %s → %s", data.get("title", ""), paper_output)
 
         else:
