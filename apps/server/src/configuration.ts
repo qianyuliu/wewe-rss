@@ -18,6 +18,19 @@ const configuration = () => {
   const updateDelayTime = parseInt(`${process.env.UPDATE_DELAY_TIME} || 60`);
 
   const enableCleanHtml = process.env.ENABLE_CLEAN_HTML === 'true';
+
+  // 内部网关大模型配置
+  const llm = {
+    apiId: process.env.OPENAI_API_ID || '',
+    apiSecret: process.env.OPENAI_API_SECRET || '',
+    apiBase: process.env.OPENAI_API_BASE || '',
+    modelId: process.env.MODEL_ID || '',
+    modelSource: process.env.MODELSOURCE || '',
+    traceId: process.env.TRACE_ID || '',
+    modelName: process.env.LLM_MODEL_NAME || 'gpt-4o-mini',
+    requestTimeout: parseInt(`${process.env.LLM_REQUEST_TIMEOUT || 120}`),
+  };
+
   return {
     server: { isProd, port, host },
     throttler: { maxRequestPerMinute },
@@ -32,6 +45,7 @@ const configuration = () => {
     database: {
       type: databaseType,
     },
+    llm,
   };
 };
 

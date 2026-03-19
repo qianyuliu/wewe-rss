@@ -14,7 +14,7 @@ services:
     volumes:
       - db_data:/var/lib/mysql
     healthcheck:
-      test: ['CMD', 'mysqladmin', 'ping', '-h', 'localhost']
+      test: [ 'CMD', 'mysqladmin', 'ping', '-h', 'localhost' ]
       timeout: 45s
       interval: 10s
       retries: 10
@@ -32,16 +32,63 @@ services:
       # 服务接口请求授权码
       - AUTH_CODE=123567
       # 提取全文内容模式
-      # - FEED_MODE=fulltext
+      - FEED_MODE=fulltext
       # 定时更新订阅源Cron表达式
-      # - CRON_EXPRESSION=35 5,17 * * *
+      - CRON_EXPRESSION=0 0 1 * * *
       # 服务接口请求限制，每分钟请求次数
       # - MAX_REQUEST_PER_MINUTE=60
       # 外网访问时，需设置为服务器的公网 IP 或者域名地址
       # - SERVER_ORIGIN_URL=http://localhost:4000
 
+      # ---- 内部网关大模型配置（按需取消注释） ----
+      # - OPENAI_API_ID=your_api_id
+      # - OPENAI_API_SECRET=your_api_secret
+      # - OPENAI_API_BASE=https://your-internal-gateway/v1
+      # - MODEL_ID=your_model_id
+      # - MODELSOURCE=your_model_source
+      # - TRACE_ID=optional_trace_id
+      # - LLM_MODEL_NAME=gpt-4o-mini
+      # - LLM_REQUEST_TIMEOUT=120
+
+  crawler:
+    build: ./crawler
+    container_name: wewe-crawler
+    restart: unless-stopped
+    depends_on:
+      - app
+    environment:
+      # wewe-rss 服务地址（容器间通信）
+      - WEWE_RSS_URL=http://app:4000
+      # 定时任务 Cron 表达式（默认每天凌晨2点，在 wewe-rss 1点刷新之后）
+      - CRAWLER_CRON=0 2 * * *
+      # 拉取最近多少小时的文章
+      - FETCH_SINCE_HOURS=48
+      # ---- 内部网关大模型配置（必填） ----
+      - OPENAI_API_ID=${OPENAI_API_ID}
+      - OPENAI_API_SECRET=${OPENAI_API_SECRET}
+      - OPENAI_API_BASE=${OPENAI_API_BASE}
+      - MODEL_ID=${MODEL_ID}
+      - MODELSOURCE=${MODELSOURCE}
+      # ---- 可选 ----
+      # - LLM_MODEL_NAME=gpt-4o-mini
+      # - LLM_REQUEST_TIMEOUT=120
+    volumes:
+      # 内部数据（存档、处理记录、日志）
+      - crawler_data:/app/data
+      # 输出到 daily-ai-trending 的数据目录（按实际路径修改）
+      - ../daily-ai-trending/github_data:/app/output/github_data
+      - ../daily-ai-trending/huggingface_data:/app/output/huggingface_data
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+
 networks:
   wewe-rss:
 
+
 volumes:
   db_data:
+  crawler_data:
