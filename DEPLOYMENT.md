@@ -84,7 +84,7 @@ MODELSOURCE=your_model_source
 # ========================================
 #  可选配置
 # ========================================
-# LLM_MODEL_NAME=gpt-4o-mini          # 模型名称，默认 gpt-4o-mini
+# LLM_MODEL_NAME=your_internal_default_model  # 应用层默认模型 ID；签名鉴权仍由 MODEL_ID 决定
 # LLM_REQUEST_TIMEOUT=120             # 请求超时，默认 120 秒
 ```
 

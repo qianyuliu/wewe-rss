@@ -5,10 +5,10 @@
   OPENAI_API_ID       内部网关 API ID（必填）
   OPENAI_API_SECRET   内部网关 API Secret（必填）
   OPENAI_API_BASE     内部网关请求地址（必填）
-  MODEL_ID            模型 ID（必填）
+  MODEL_ID            聚智签名鉴权使用的模型 ID（必填）
   MODELSOURCE         模型来源（必填）
   TRACE_ID            追踪 ID（可选）
-  LLM_MODEL_NAME      调用时使用的模型名（可选，默认 gpt-4o-mini）
+  LLM_MODEL_NAME      应用层传给 OpenAI SDK 的模型标识（可选）
   LLM_REQUEST_TIMEOUT 请求超时秒数（可选，默认 120）
 
 用法示例：

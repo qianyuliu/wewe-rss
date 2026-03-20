@@ -42,10 +42,10 @@ services:
       - OPENAI_API_ID="F2A47DD34AA14317A299"
       - OPENAI_API_SECRET="3C99BF47F2FB406193FE9245FC5DFFB9"
       - OPENAI_API_BASE="http://172.16.251.142:9060/openapi/flames/api/v1/openai/chat"
-      - MODEL_ID="e540143ba8ec49d289ad6b1f9c7a3df6"
+      - MODEL_ID=${MODEL_ID}
       - MODELSOURCE="private"
       - TRACE_ID="6596ecf8-023b-4365-ab6c-cdedde8cddae"
-      - LLM_MODEL_NAME="c75441a972d34ff893bf859f86c8f96a"
+      - LLM_MODEL_NAME=${LLM_MODEL_NAME}
       - LLM_REQUEST_TIMEOUT=180
 
   crawler:
@@ -73,7 +73,7 @@ services:
       - MODEL_ID=${MODEL_ID}
       - MODELSOURCE=${MODELSOURCE}
       # ---- 可选 ----
-      - LLM_MODEL_NAME="c75441a972d34ff893bf859f86c8f96a"
+      - LLM_MODEL_NAME=${LLM_MODEL_NAME}
       - LLM_REQUEST_TIMEOUT=180
     volumes:
       # 内部数据（存档、处理记录、日志）
